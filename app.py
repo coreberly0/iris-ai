@@ -8,6 +8,7 @@ app = Flask(__name__)
 # ---------------- DECODE BASE64 ----------------
 def decode_image(base64_str):
     try:
+        # ✅ remove data:image prefix
         base64_str = base64_str.split(",")[-1]
 
         img_data = base64.b64decode(base64_str)
@@ -20,54 +21,45 @@ def decode_image(base64_str):
         return None
 
 
-# ---------------- FEATURE EXTRACTION (STABLE VERSION) ----------------
+# ---------------- EXTRACT IRIS FEATURES ----------------
 def extract_features(img):
-
-    # 1. resize fixed
+    # ✅ resize bigger for better detail
     img = cv2.resize(img, (128, 128))
 
-    # 2. normalize lighting
+    # ✅ normalize brightness
     img = cv2.equalizeHist(img)
 
-    # 3. center crop (more stable size)
+    # ✅ take center crop (focus iris area)
     h, w = img.shape
     cx, cy = w // 2, h // 2
 
-    crop = img[cy-50:cy+50, cx-50:cx+50]
+    crop = img[cy-40:cy+40, cx-40:cx+40]
 
-    if crop.shape != (100, 100):
-        crop = cv2.resize(crop, (100, 100))
+    # safety check
+    if crop.shape != (80, 80):
+        crop = cv2.resize(crop, (80, 80))
 
-    # 4. blur noise
+    # ✅ reduce noise
     crop = cv2.GaussianBlur(crop, (5, 5), 0)
 
-    # 5. edges
-    edges = cv2.Canny(crop, 40, 120)
+    # ✅ edge detection
+    edges = cv2.Canny(crop, 50, 150)
 
-    # 6. normalize
-    crop = crop.astype(np.float32) / 255.0
-    edges = edges.astype(np.float32) / 255.0
+    # ✅ normalize values (important!)
+    crop = crop / 255.0
+    edges = edges / 255.0
 
-    # 7. flatten
-    crop_vec = crop.flatten()
-    edge_vec = edges.flatten()
+    # ✅ combine features
+    combined = np.concatenate((crop.flatten(), edges.flatten()))
 
-    # 8. combine
-    vector = np.concatenate((crop_vec, edge_vec))
-
-    # 9. IMPORTANT: L2 NORMALIZATION (FIXES YOUR BUG)
-    norm = np.linalg.norm(vector)
-    if norm > 0:
-        vector = vector / norm
-
-    return vector.tolist()
+    return combined.tolist()
 
 
 # ---------------- API ----------------
 @app.route("/extract", methods=["POST"])
 def extract():
     try:
-        data = request.get_json()
+        data = request.json
         iris = data.get("irisImage")
 
         if not iris:
@@ -80,21 +72,16 @@ def extract():
 
         vector = extract_features(img)
 
-        return jsonify({
-            "iris_vector": vector,
-            "length": len(vector)
-        })
+        return jsonify({"iris_vector": vector})
 
     except Exception as e:
-        print("ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
 
-# ---------------- HEALTH ----------------
 @app.route("/", methods=["GET"])
 def home():
     return "Iris AI Running ✅"
 
 
 if __name__ == "__main__":
-     app.run(debug=True)
+    app.run(debug=True)
