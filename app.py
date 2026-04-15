@@ -7,36 +7,63 @@ app = Flask(__name__)
 
 # ---------------- DECODE BASE64 ----------------
 def decode_image(base64_str):
-    img_data = base64.b64decode(base64_str)
-    np_arr = np.frombuffer(img_data, np.uint8)
-    img = cv2.imdecode(np_arr, cv2.IMREAD_GRAYSCALE)
-    return img
+    try:
+        # ✅ remove data:image prefix
+        base64_str = base64_str.split(",")[-1]
+
+        img_data = base64.b64decode(base64_str)
+        np_arr = np.frombuffer(img_data, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_GRAYSCALE)
+
+        return img
+    except Exception as e:
+        print("DECODE ERROR:", e)
+        return None
+
 
 # ---------------- EXTRACT IRIS FEATURES ----------------
 def extract_features(img):
-    # ✅ Resize (important for consistency)
-    img = cv2.resize(img, (64, 64))
+    # ✅ resize bigger for better detail
+    img = cv2.resize(img, (128, 128))
 
-    # ✅ Improve contrast
+    # ✅ normalize brightness
     img = cv2.equalizeHist(img)
 
-    # ✅ Reduce noise
-    img = cv2.GaussianBlur(img, (5, 5), 0)
+    # ✅ take center crop (focus iris area)
+    h, w = img.shape
+    cx, cy = w // 2, h // 2
 
-    # ✅ Edge detection (very important)
-    edges = cv2.Canny(img, 50, 150)
+    crop = img[cy-40:cy+40, cx-40:cx+40]
 
-    # ✅ Combine original + edges
-    combined = np.concatenate((img.flatten(), edges.flatten()))
+    # safety check
+    if crop.shape != (80, 80):
+        crop = cv2.resize(crop, (80, 80))
+
+    # ✅ reduce noise
+    crop = cv2.GaussianBlur(crop, (5, 5), 0)
+
+    # ✅ edge detection
+    edges = cv2.Canny(crop, 50, 150)
+
+    # ✅ normalize values (important!)
+    crop = crop / 255.0
+    edges = edges / 255.0
+
+    # ✅ combine features
+    combined = np.concatenate((crop.flatten(), edges.flatten()))
 
     return combined.tolist()
+
 
 # ---------------- API ----------------
 @app.route("/extract", methods=["POST"])
 def extract():
     try:
         data = request.json
-        iris = data["irisImage"]
+        iris = data.get("irisImage")
+
+        if not iris:
+            return jsonify({"error": "No image"}), 400
 
         img = decode_image(iris)
 
@@ -50,9 +77,11 @@ def extract():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/", methods=["GET"])
 def home():
     return "Iris AI Running ✅"
 
+
 if __name__ == "__main__":
-   app.run(debug=True)
+    app.run(debug=True)
